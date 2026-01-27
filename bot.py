@@ -12,13 +12,13 @@ import asyncio
 import sqlite3
 
 # Bot tokenini muhit o'zgaruvchisidan olish
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("8336134380:AAFBWpbfhY4HdiuVevvXxHjlfqpH3pn-8aE")
 if not TOKEN:
     raise ValueError("BOT_TOKEN muhit o'zgaruvchisida topilmadi!")
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(token=TOKEN)
+bot = Bot(token="8336134380:AAFBWpbfhY4HdiuVevvXxHjlfqpH3pn-8aE")
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
