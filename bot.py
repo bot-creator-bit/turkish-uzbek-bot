@@ -11,14 +11,22 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import asyncio
 import sqlite3
 
-# Bot tokeningizni muhit o'zgaruvchisidan yoki to'g'ridan-to'g'ri olish
-TOKEN = os.getenv("BOT_TOKEN", "8336134380:AAFBWpbfhY4HdiuVevvXxHjlfqpH3pn-8aE")
+# Bot tokenini muhit o'zgaruvchisidan olish
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise ValueError("BOT_TOKEN muhit o'zgaruvchisida topilmadi!")
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
+# Database yo'li
+def get_db_path():
+    """Database fayl yo'lini qaytaradi"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, 'language_test.db')
 
 # FSM States
 class TestStates(StatesGroup):
@@ -29,23 +37,39 @@ class TestStates(StatesGroup):
 # JSON fayldan so'zlarni yuklash
 def load_words_from_json():
     """JSON fayldan barcha so'zlarni yuklaydi"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    json_path = os.path.join(script_dir, 'words.json')
+    
     try:
-        with open('words.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
+        with open(json_path, 'r', encoding='utf-8') as f:
+            words_data = json.load(f)
+            logging.info(f"✅ JSON fayl yuklandi: {len(words_data)} daraja")
+            for level in words_data.keys():
+                logging.info(f"  - {level}: {len(words_data[level])} ta so'z")
+            return words_data
     except FileNotFoundError:
-        logging.error("words.json fayli topilmadi!")
+        logging.error(f"❌ words.json topilmadi: {json_path}")
+        logging.error(f"Hozirgi katalog: {os.getcwd()}")
+        try:
+            files = os.listdir(script_dir)
+            logging.error(f"Mavjud fayllar: {files}")
+        except:
+            pass
         return {}
     except json.JSONDecodeError as e:
-        logging.error(f"JSON faylni o'qishda xatolik: {e}")
+        logging.error(f"❌ JSON xatosi: {e}")
         return {}
 
-# Database yaratish va so'zlarni qo'shish
+# Database yaratish
 def init_database():
     """Database va jadvallarni yaratadi, JSON dan so'zlarni yuklaydi"""
-    conn = sqlite3.connect('language_test.db')
+    db_path = get_db_path()
+    logging.info(f"📁 Database: {db_path}")
+    
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # Users jadvali
+    # Jadvallar yaratish
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -55,7 +79,6 @@ def init_database():
         )
     ''')
     
-    # Words jadvali
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS words (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,7 +88,6 @@ def init_database():
         )
     ''')
     
-    # Test results jadvali
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS test_results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,32 +101,39 @@ def init_database():
     
     # So'zlar mavjudligini tekshirish
     cursor.execute("SELECT COUNT(*) FROM words")
-    if cursor.fetchone()[0] == 0:
-        # JSON dan so'zlarni yuklash
+    word_count = cursor.fetchone()[0]
+    
+    if word_count == 0:
+        logging.info("📥 JSON dan so'zlarni yuklash...")
         words_data = load_words_from_json()
         
         if words_data:
-            logging.info("JSON fayldan so'zlarni databasega yuklash boshlandi...")
-            
+            total = 0
             for level, words in words_data.items():
                 for uzb, turk in words:
                     cursor.execute(
                         "INSERT INTO words (level, uzbek, turkish) VALUES (?, ?, ?)",
                         (level, uzb, turk)
                     )
+                    total += 1
             
             conn.commit()
-            logging.info(f"✅ Jami {len(words_data)} daraja uchun so'zlar muvaffaqiyatli yuklandi!")
+            logging.info(f"✅ {total} ta so'z yuklandi!")
+            
+            # Har daraja uchun hisob
+            for level in words_data.keys():
+                cursor.execute("SELECT COUNT(*) FROM words WHERE level = ?", (level,))
+                count = cursor.fetchone()[0]
+                logging.info(f"  - {level}: {count} ta so'z")
         else:
-            logging.warning("⚠️ JSON fayldan so'zlar yuklanmadi!")
+            logging.error("⚠️ JSON fayl bo'sh yoki xato!")
     else:
-        logging.info("✅ Database allaqachon so'zlar bilan to'ldirilgan")
+        logging.info(f"✅ Database: {word_count} ta so'z")
     
     conn.close()
 
-# Foydalanuvchini database saqlash
 def save_user(user_id, username, level):
-    conn = sqlite3.connect('language_test.db')
+    conn = sqlite3.connect(get_db_path())
     cursor = conn.cursor()
     cursor.execute('''
         INSERT OR REPLACE INTO users (user_id, username, level, test_count)
@@ -113,19 +142,23 @@ def save_user(user_id, username, level):
     conn.commit()
     conn.close()
 
-# Foydalanuvchi ma'lumotlarini olish
 def get_user(user_id):
-    conn = sqlite3.connect('language_test.db')
+    conn = sqlite3.connect(get_db_path())
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     user = cursor.fetchone()
     conn.close()
     return user
 
-# Test uchun so'zlarni olish
 def get_test_words(level, count=20):
-    conn = sqlite3.connect('language_test.db')
+    conn = sqlite3.connect(get_db_path())
     cursor = conn.cursor()
+    
+    # Debug
+    cursor.execute("SELECT COUNT(*) FROM words WHERE level = ?", (level,))
+    total = cursor.fetchone()[0]
+    logging.info(f"🔍 {level} uchun {total} ta so'z")
+    
     cursor.execute(
         "SELECT uzbek, turkish FROM words WHERE level = ? ORDER BY RANDOM() LIMIT ?",
         (level, count)
@@ -134,9 +167,8 @@ def get_test_words(level, count=20):
     conn.close()
     return words
 
-# Test natijasini saqlash
 def save_test_result(user_id, level, correct, incorrect):
-    conn = sqlite3.connect('language_test.db')
+    conn = sqlite3.connect(get_db_path())
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO test_results (user_id, level, correct, incorrect)
@@ -149,7 +181,6 @@ def save_test_result(user_id, level, correct, incorrect):
     conn.commit()
     conn.close()
 
-# Daraja tanlash tugmalari
 def get_level_keyboard():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="A1 - Boshlang'ich", callback_data="level_A1")],
@@ -161,7 +192,6 @@ def get_level_keyboard():
     ])
     return keyboard
 
-# Testni boshlash tugmalari
 def get_start_test_keyboard():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -171,13 +201,11 @@ def get_start_test_keyboard():
     ])
     return keyboard
 
-# Javob tugmalari
 def get_answer_keyboard(options):
     buttons = [[InlineKeyboardButton(text=opt, callback_data=f"answer_{i}")] 
                for i, opt in enumerate(options)]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# /start komandasi
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     user = get_user(message.from_user.id)
@@ -185,21 +213,20 @@ async def cmd_start(message: types.Message, state: FSMContext):
     if user:
         await message.answer(
             f"Xush kelibsiz, {message.from_user.first_name}!\n\n"
-            f"Sizning darajangiz: {user[2]}\n"
-            f"Topshirgan testlar soni: {user[3]}\n\n"
-            f"Yangi test boshlash uchun darajangizni tanlang:",
+            f"Darajangiz: {user[2]}\n"
+            f"Testlar: {user[3]}\n\n"
+            f"Yangi test uchun darajani tanlang:",
             reply_markup=get_level_keyboard()
         )
     else:
         await message.answer(
             f"Assalomu alaykum, {message.from_user.first_name}! 🇺🇿🇹🇷\n\n"
             f"O'zbek-Turk tili test botiga xush kelibsiz!\n\n"
-            f"Iltimos, o'z darajangizni tanlang:",
+            f"Darajangizni tanlang:",
             reply_markup=get_level_keyboard()
         )
     await state.set_state(TestStates.choosing_level)
 
-# Daraja tanlash
 @dp.callback_query(F.data.startswith("level_"))
 async def process_level_selection(callback: types.CallbackQuery, state: FSMContext):
     level = callback.data.split("_")[1]
@@ -216,24 +243,23 @@ async def process_level_selection(callback: types.CallbackQuery, state: FSMConte
     await state.set_state(TestStates.ready_to_start)
     await callback.answer()
 
-# Testni boshlash
 @dp.callback_query(F.data == "start_yes")
 async def start_test(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     level = data.get('level')
     
-    # Testni boshlash
     words = get_test_words(level, 20)
     
     if not words:
-        await callback.message.edit_text("Xatolik! Ushbu daraja uchun so'zlar topilmadi.")
+        await callback.message.edit_text(
+            f"❌ {level} uchun so'zlar topilmadi!\n"
+            f"Iltimos, admin bilan bog'laning."
+        )
         await state.clear()
         return
     
-    # Test savollarini tayyorlash
     questions = []
     for uzb, turk in words:
-        # Tasodifiy yo'nalish: O'zbekcha->Turkcha yoki Turkcha->O'zbekcha
         if random.choice([True, False]):
             question_word = uzb
             correct_answer = turk
@@ -243,7 +269,6 @@ async def start_test(callback: types.CallbackQuery, state: FSMContext):
             correct_answer = uzb
             question_type = "tr_uz"
         
-        # Noto'g'ri javoblar uchun boshqa so'zlarni olish
         other_words = get_test_words(level, 4)
         wrong_answers = []
         for w in other_words:
@@ -256,7 +281,6 @@ async def start_test(callback: types.CallbackQuery, state: FSMContext):
             if len(wrong_answers) >= 3:
                 break
         
-        # Javoblarni aralashtirish
         options = wrong_answers[:3] + [correct_answer]
         random.shuffle(options)
         correct_index = options.index(correct_answer)
@@ -275,26 +299,23 @@ async def start_test(callback: types.CallbackQuery, state: FSMContext):
         incorrect_answers=0
     )
     
-    # Birinchi savolni yuborish
     await send_question(callback.message, state)
     await callback.answer()
 
 @dp.callback_query(F.data == "start_no")
 async def cancel_test(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
-        "Test bekor qilindi. Qaytadan boshlash uchun /start buyrug'ini yuboring."
+        "Test bekor qilindi. /start"
     )
     await state.clear()
     await callback.answer()
 
-# Savolni yuborish
 async def send_question(message: types.Message, state: FSMContext):
     data = await state.get_data()
     questions = data['questions']
     current = data['current_question']
     
     if current >= len(questions):
-        # Test tugadi
         await finish_test(message, state)
         return
     
@@ -313,7 +334,6 @@ async def send_question(message: types.Message, state: FSMContext):
     )
     await state.set_state(TestStates.taking_test)
 
-# Javobni tekshirish
 @dp.callback_query(F.data.startswith("answer_"))
 async def check_answer(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -332,9 +352,8 @@ async def check_answer(callback: types.CallbackQuery, state: FSMContext):
     else:
         incorrect_answers += 1
         correct_word = question['options'][question['correct']]
-        result = f"❌ Noto'g'ri! To'g'ri javob: <b>{correct_word}</b>"
+        result = f"❌ Noto'g'ri! To'g'ri: {correct_word}"
     
-    # Keyingi savolga o'tish
     await state.update_data(
         current_question=current + 1,
         correct_answers=correct_answers,
@@ -344,7 +363,6 @@ async def check_answer(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer(result, show_alert=True)
     await send_question(callback.message, state)
 
-# Testni tugatish
 async def finish_test(message: types.Message, state: FSMContext):
     data = await state.get_data()
     correct = data['correct_answers']
@@ -354,10 +372,8 @@ async def finish_test(message: types.Message, state: FSMContext):
     total = correct + incorrect
     percentage = (correct / total * 100) if total > 0 else 0
     
-    # Natijani saqlash
     save_test_result(message.chat.id, level, correct, incorrect)
     
-    # Baho berish
     if percentage >= 90:
         grade = "A'lo! 🌟"
     elif percentage >= 75:
@@ -365,16 +381,16 @@ async def finish_test(message: types.Message, state: FSMContext):
     elif percentage >= 60:
         grade = "Qoniqarli ✅"
     else:
-        grade = "Yaxshilanishi kerak 📚"
+        grade = "Yaxshilanish kerak 📚"
     
     result_text = (
         f"🎉 <b>Test yakunlandi!</b>\n\n"
-        f"📊 <b>Natijalaringiz:</b>\n"
-        f"✅ To'g'ri javoblar: {correct}\n"
-        f"❌ Noto'g'ri javoblar: {incorrect}\n"
+        f"📊 <b>Natijalar:</b>\n"
+        f"✅ To'g'ri: {correct}\n"
+        f"❌ Noto'g'ri: {incorrect}\n"
         f"📈 Foiz: {percentage:.1f}%\n\n"
         f"🏆 Baho: {grade}\n\n"
-        f"Yangi test boshlash uchun /start buyrug'ini yuboring."
+        f"/start"
     )
     
     await message.edit_text(result_text, parse_mode="HTML")
@@ -384,14 +400,19 @@ async def finish_test(message: types.Message, state: FSMContext):
 async def main():
     """Bot ishga tushirish"""
     try:
-        # Database yaratish va so'zlarni yuklash
+        # Webhook o'chirish (Railway uchun)
+        await bot.delete_webhook(drop_pending_updates=True)
+        logging.info("✅ Webhook o'chirildi")
+        
+        # Database yaratish
         init_database()
-        logging.info("✅ Bot muvaffaqiyatli ishga tushdi!")
+        logging.info("✅ Bot ishga tushdi!")
         
         # Polling boshlash
         await dp.start_polling(bot)
     except Exception as e:
-        logging.error(f"❌ Bot ishga tushirishda xatolik: {e}")
+        logging.error(f"❌ Xato: {e}")
+        raise
 
 if __name__ == "__main__":
     asyncio.run(main())
