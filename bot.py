@@ -11,12 +11,18 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import asyncio
 import sqlite3
 
-# Bot tokenini muhit o'zgaruvchisidan olish
-TOKEN = os.getenv("8336134380:AAFBWpbfhY4HdiuVevvXxHjlfqpH3pn-8aE")
-if not TOKEN:
-    raise ValueError("BOT_TOKEN muhit o'zgaruvchisida topilmadi!")
+# Bot tokenini olish (Railway yoki default)
+TOKEN = os.getenv("BOT_TOKEN")
 
-logging.basicConfig(level=logging.INFO)
+# Agar Railway'da token bo'lmasa, default ishlatish
+if not TOKEN:
+    TOKEN = "8336134380:AAFBWpbfhY4HdiuVevvXxHjlfqpH3pn-8aE"
+    logging.warning("⚠️ BOT_TOKEN muhit o'zgaruvchisida topilmadi, default token ishlatilmoqda")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
@@ -53,8 +59,8 @@ def load_words_from_json():
         try:
             files = os.listdir(script_dir)
             logging.error(f"Mavjud fayllar: {files}")
-        except:
-            pass
+        except Exception as e:
+            logging.error(f"Fayllarni ko'rsatishda xato: {e}")
         return {}
     except json.JSONDecodeError as e:
         logging.error(f"❌ JSON xatosi: {e}")
@@ -400,7 +406,7 @@ async def finish_test(message: types.Message, state: FSMContext):
 async def main():
     """Bot ishga tushirish"""
     try:
-        # Webhook o'chirish (Railway uchun)
+        # Webhook o'chirish
         await bot.delete_webhook(drop_pending_updates=True)
         logging.info("✅ Webhook o'chirildi")
         
