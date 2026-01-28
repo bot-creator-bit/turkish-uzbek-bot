@@ -11,17 +11,12 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import asyncio
 import sqlite3
 
-# Bot tokenini olish (Railway yoki default)
-TOKEN = os.getenv("BOT_TOKEN")
-
-# Agar Railway'da token bo'lmasa, default ishlatish
-if not TOKEN:
-    TOKEN = "8336134380:AAFBWpbfhY4HdiuVevvXxHjlfqpH3pn-8aE"
-    logging.warning("⚠️ BOT_TOKEN muhit o'zgaruvchisida topilmadi, default token ishlatilmoqda")
+# 🔥 BU YERGA YANGI TOKENNI YOZING
+TOKEN = os.getenv("BOT_TOKEN", "8085922451:AAHiBt-5HvDL51LZmSQgfw_4ls5p6_zEluI")
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
 bot = Bot(token=TOKEN)
@@ -49,18 +44,10 @@ def load_words_from_json():
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
             words_data = json.load(f)
-            logging.info(f"✅ JSON fayl yuklandi: {len(words_data)} daraja")
-            for level in words_data.keys():
-                logging.info(f"  - {level}: {len(words_data[level])} ta so'z")
+            logging.info(f"✅ JSON yuklandi: {len(words_data)} daraja")
             return words_data
     except FileNotFoundError:
         logging.error(f"❌ words.json topilmadi: {json_path}")
-        logging.error(f"Hozirgi katalog: {os.getcwd()}")
-        try:
-            files = os.listdir(script_dir)
-            logging.error(f"Mavjud fayllar: {files}")
-        except Exception as e:
-            logging.error(f"Fayllarni ko'rsatishda xato: {e}")
         return {}
     except json.JSONDecodeError as e:
         logging.error(f"❌ JSON xatosi: {e}")
@@ -68,14 +55,13 @@ def load_words_from_json():
 
 # Database yaratish
 def init_database():
-    """Database va jadvallarni yaratadi, JSON dan so'zlarni yuklaydi"""
+    """Database va jadvallarni yaratadi"""
     db_path = get_db_path()
     logging.info(f"📁 Database: {db_path}")
     
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # Jadvallar yaratish
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -105,12 +91,11 @@ def init_database():
         )
     ''')
     
-    # So'zlar mavjudligini tekshirish
     cursor.execute("SELECT COUNT(*) FROM words")
     word_count = cursor.fetchone()[0]
     
     if word_count == 0:
-        logging.info("📥 JSON dan so'zlarni yuklash...")
+        logging.info("📥 So'zlarni yuklash...")
         words_data = load_words_from_json()
         
         if words_data:
@@ -122,17 +107,10 @@ def init_database():
                         (level, uzb, turk)
                     )
                     total += 1
-            
             conn.commit()
             logging.info(f"✅ {total} ta so'z yuklandi!")
-            
-            # Har daraja uchun hisob
-            for level in words_data.keys():
-                cursor.execute("SELECT COUNT(*) FROM words WHERE level = ?", (level,))
-                count = cursor.fetchone()[0]
-                logging.info(f"  - {level}: {count} ta so'z")
         else:
-            logging.error("⚠️ JSON fayl bo'sh yoki xato!")
+            logging.error("⚠️ JSON fayl bo'sh!")
     else:
         logging.info(f"✅ Database: {word_count} ta so'z")
     
@@ -159,12 +137,6 @@ def get_user(user_id):
 def get_test_words(level, count=20):
     conn = sqlite3.connect(get_db_path())
     cursor = conn.cursor()
-    
-    # Debug
-    cursor.execute("SELECT COUNT(*) FROM words WHERE level = ?", (level,))
-    total = cursor.fetchone()[0]
-    logging.info(f"🔍 {level} uchun {total} ta so'z")
-    
     cursor.execute(
         "SELECT uzbek, turkish FROM words WHERE level = ? ORDER BY RANDOM() LIMIT ?",
         (level, count)
@@ -188,7 +160,7 @@ def save_test_result(user_id, level, correct, incorrect):
     conn.close()
 
 def get_level_keyboard():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="A1 - Boshlang'ich", callback_data="level_A1")],
         [InlineKeyboardButton(text="A2 - Elementar", callback_data="level_A2")],
         [InlineKeyboardButton(text="B1 - O'rta", callback_data="level_B1")],
@@ -196,16 +168,14 @@ def get_level_keyboard():
         [InlineKeyboardButton(text="C1 - Ilg'or", callback_data="level_C1")],
         [InlineKeyboardButton(text="C2 - Mohir", callback_data="level_C2")]
     ])
-    return keyboard
 
 def get_start_test_keyboard():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="✅ Ha", callback_data="start_yes"),
             InlineKeyboardButton(text="❌ Yo'q", callback_data="start_no")
         ]
     ])
-    return keyboard
 
 def get_answer_keyboard(options):
     buttons = [[InlineKeyboardButton(text=opt, callback_data=f"answer_{i}")] 
@@ -237,7 +207,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
 async def process_level_selection(callback: types.CallbackQuery, state: FSMContext):
     level = callback.data.split("_")[1]
     await state.update_data(level=level)
-    
     save_user(callback.from_user.id, callback.from_user.username, level)
     
     await callback.message.edit_text(
@@ -257,10 +226,7 @@ async def start_test(callback: types.CallbackQuery, state: FSMContext):
     words = get_test_words(level, 20)
     
     if not words:
-        await callback.message.edit_text(
-            f"❌ {level} uchun so'zlar topilmadi!\n"
-            f"Iltimos, admin bilan bog'laning."
-        )
+        await callback.message.edit_text(f"❌ {level} uchun so'zlar topilmadi!")
         await state.clear()
         return
     
@@ -289,12 +255,11 @@ async def start_test(callback: types.CallbackQuery, state: FSMContext):
         
         options = wrong_answers[:3] + [correct_answer]
         random.shuffle(options)
-        correct_index = options.index(correct_answer)
         
         questions.append({
             'question': question_word,
             'options': options,
-            'correct': correct_index,
+            'correct': options.index(correct_answer),
             'type': question_type
         })
     
@@ -310,9 +275,7 @@ async def start_test(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "start_no")
 async def cancel_test(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        "Test bekor qilindi. /start"
-    )
+    await callback.message.edit_text("Test bekor qilindi. /start")
     await state.clear()
     await callback.answer()
 
@@ -326,15 +289,11 @@ async def send_question(message: types.Message, state: FSMContext):
         return
     
     question = questions[current]
-    lang_direction = "🇺🇿 ➡️ 🇹🇷" if question['type'] == "uz_tr" else "🇹🇷 ➡️ 🇺🇿"
-    
-    text = (
-        f"Savol {current + 1}/20 {lang_direction}\n\n"
-        f"<b>{question['question']}</b> so'zining tarjimasini toping:"
-    )
+    lang = "🇺🇿 ➡️ 🇹🇷" if question['type'] == "uz_tr" else "🇹🇷 ➡️ 🇺🇿"
     
     await message.edit_text(
-        text,
+        f"Savol {current + 1}/20 {lang}\n\n"
+        f"<b>{question['question']}</b> so'zining tarjimasini toping:",
         reply_markup=get_answer_keyboard(question['options']),
         parse_mode="HTML"
     )
@@ -349,7 +308,6 @@ async def check_answer(callback: types.CallbackQuery, state: FSMContext):
     current = data['current_question']
     correct_answers = data['correct_answers']
     incorrect_answers = data['incorrect_answers']
-    
     question = questions[current]
     
     if answer_index == question['correct']:
@@ -357,8 +315,7 @@ async def check_answer(callback: types.CallbackQuery, state: FSMContext):
         result = "✅ To'g'ri!"
     else:
         incorrect_answers += 1
-        correct_word = question['options'][question['correct']]
-        result = f"❌ Noto'g'ri! To'g'ri: {correct_word}"
+        result = f"❌ Noto'g'ri! To'g'ri: {question['options'][question['correct']]}"
     
     await state.update_data(
         current_question=current + 1,
@@ -377,7 +334,6 @@ async def finish_test(message: types.Message, state: FSMContext):
     
     total = correct + incorrect
     percentage = (correct / total * 100) if total > 0 else 0
-    
     save_test_result(message.chat.id, level, correct, incorrect)
     
     if percentage >= 90:
@@ -389,32 +345,25 @@ async def finish_test(message: types.Message, state: FSMContext):
     else:
         grade = "Yaxshilanish kerak 📚"
     
-    result_text = (
+    await message.edit_text(
         f"🎉 <b>Test yakunlandi!</b>\n\n"
-        f"📊 <b>Natijalar:</b>\n"
+        f"📊 Natijalar:\n"
         f"✅ To'g'ri: {correct}\n"
         f"❌ Noto'g'ri: {incorrect}\n"
         f"📈 Foiz: {percentage:.1f}%\n\n"
-        f"🏆 Baho: {grade}\n\n"
-        f"/start"
+        f"🏆 Baho: {grade}\n\n/start",
+        parse_mode="HTML"
     )
-    
-    await message.edit_text(result_text, parse_mode="HTML")
     await state.clear()
 
-# Botni ishga tushirish
 async def main():
-    """Bot ishga tushirish"""
     try:
-        # Webhook o'chirish
         await bot.delete_webhook(drop_pending_updates=True)
         logging.info("✅ Webhook o'chirildi")
         
-        # Database yaratish
         init_database()
         logging.info("✅ Bot ishga tushdi!")
         
-        # Polling boshlash
         await dp.start_polling(bot)
     except Exception as e:
         logging.error(f"❌ Xato: {e}")
